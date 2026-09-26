@@ -371,7 +371,7 @@ fun DocumentResultScreen(
                             expanded = showDocTypeDropdown,
                             onDismissRequest = { showDocTypeDropdown = false }
                         ) {
-                            DocType.values().forEach { type ->
+                            DocType.values().filter { it != DocType.UNKNOWN }.forEach { type ->
                                 DropdownMenuItem(
                                     text = { Text(type.displayName) },
                                     onClick = {

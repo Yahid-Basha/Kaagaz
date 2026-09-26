@@ -29,5 +29,10 @@ enum class DocType(
         displayName = "Insurance Policy Document",
         code = "INSURANCE",
         description = "Motor, Health or Term Life insurance policy"
+    ),
+    UNKNOWN(
+        displayName = "Unrecognized Document",
+        code = "UNKNOWN",
+        description = "Could not confidently classify this document"
     )
 }

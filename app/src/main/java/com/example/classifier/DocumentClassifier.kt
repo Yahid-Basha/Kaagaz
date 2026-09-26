@@ -40,6 +40,9 @@ data class TriggeredObligationTemplate(
 
 object DocumentClassifier {
     private const val TAG = "DocumentClassifier"
+    private const val CONFIDENCE_THRESHOLD = 0.5f
+
+    private data class KeywordMatch(val docType: DocType, val score: Int, val confidence: Float)
 
     /**
      * Classifies an OCR document using MediaPipe LLM Inference if initialized,
@@ -110,9 +113,24 @@ object DocumentClassifier {
                 return classifyDocumentFallback(ocrText)
             }
 
-            val parsedDocType = DocType.valueOf(docTypeStr)
+            val modelDocType = DocType.valueOf(docTypeStr)
+            val modelConfidence = jsonObj.optDouble("confidence", 0.92).toFloat().coerceIn(0.0f, 1.0f)
 
-            val confidence = jsonObj.optDouble("confidence", 0.92).toFloat().coerceIn(0.0f, 1.0f)
+            // Model reported low confidence: don't trust its docType outright. Cross-check
+            // against keyword scoring and take whichever signal is stronger; if the keyword
+            // scoring found nothing either, both signals are weak so classify as UNKNOWN
+            // instead of guessing.
+            val (resolvedDocType, resolvedConfidence) = if (modelConfidence < CONFIDENCE_THRESHOLD) {
+                val keywordMatch = scoreDocumentByKeywords(ocrText)
+                if (keywordMatch.score > 0) {
+                    keywordMatch.docType to keywordMatch.confidence
+                } else {
+                    DocType.UNKNOWN to modelConfidence
+                }
+            } else {
+                modelDocType to modelConfidence
+            }
+
             val holderNameRaw = jsonObj.optString("holderName", "")
             val holderName = if (holderNameRaw.equals("null", ignoreCase = true)) "" else holderNameRaw
             val docNumRaw = jsonObj.optString("documentNumber", "")
@@ -120,20 +138,28 @@ object DocumentClassifier {
             val printedDateRaw = jsonObj.optString("printedDate", "")
             val printedDate = if (printedDateRaw.equals("null", ignoreCase = true)) "" else printedDateRaw
 
-            val fallbackFields = extractDocumentFields(ocrText, parsedDocType)
+            // Validate the model's documentNumber against the resolved docType's own pattern
+            // before displaying it - a well-formed-looking but wrong-shaped value is worse
+            // than admitting we're not confident.
+            val docNumberValid = docNumber.isNotBlank() && matchesDocumentNumberPattern(docNumber, resolvedDocType)
+
+            // Regex/heuristic extraction must run against the resolved docType, not the
+            // model's raw (possibly untrusted) one - otherwise a misclassified document runs
+            // the wrong doc type's regex against the OCR text.
+            val fallbackFields = extractDocumentFields(ocrText, resolvedDocType)
             val extractedFields = ExtractedFields(
                 holderName = holderName.ifBlank { fallbackFields.holderName },
-                documentNumber = docNumber.ifBlank { fallbackFields.documentNumber },
+                documentNumber = if (docNumberValid) docNumber else fallbackFields.documentNumber,
                 printedDate = printedDate.ifBlank { fallbackFields.printedDate },
                 holderNameConfident = holderName.isNotBlank() || fallbackFields.holderNameConfident,
-                documentNumberConfident = docNumber.isNotBlank() || fallbackFields.documentNumberConfident,
+                documentNumberConfident = docNumberValid || fallbackFields.documentNumberConfident,
                 printedDateConfident = printedDate.isNotBlank() || fallbackFields.printedDateConfident
             )
 
             // 5. If parsing succeeds, map it into the existing ClassificationResult type.
             ClassificationResult(
-                docType = parsedDocType,
-                confidence = confidence,
+                docType = resolvedDocType,
+                confidence = resolvedConfidence,
                 extractedFields = extractedFields,
                 rawOcrText = ocrText,
                 usedOnDeviceModel = true
@@ -148,6 +174,19 @@ object DocumentClassifier {
      * Keyword-match fallback implementation
      */
     fun classifyDocumentFallback(ocrText: String): ClassificationResult {
+        val match = scoreDocumentByKeywords(ocrText)
+        val extracted = extractDocumentFields(ocrText, match.docType)
+
+        return ClassificationResult(
+            docType = match.docType,
+            confidence = match.confidence,
+            extractedFields = extracted,
+            rawOcrText = ocrText,
+            usedOnDeviceModel = false
+        )
+    }
+
+    private fun scoreDocumentByKeywords(ocrText: String): KeywordMatch {
         val lowerText = ocrText.lowercase()
 
         // Score based on keyword matches
@@ -208,15 +247,19 @@ object DocumentClassifier {
             0.72f
         }
 
-        val extracted = extractDocumentFields(ocrText, docType)
+        return KeywordMatch(docType, best.second, fakeConfidence)
+    }
 
-        return ClassificationResult(
-            docType = docType,
-            confidence = fakeConfidence,
-            extractedFields = extracted,
-            rawOcrText = ocrText,
-            usedOnDeviceModel = false
-        )
+    private fun matchesDocumentNumberPattern(value: String, docType: DocType): Boolean {
+        val upper = value.uppercase()
+        return when (docType) {
+            DocType.PAN_CARD -> Pattern.compile("[A-Z]{5}[0-9]{4}[A-Z]").matcher(upper).find()
+            DocType.RC, DocType.PUC ->
+                Pattern.compile("[A-Z]{2}[\\s-]?[0-9]{1,2}[\\s-]?[A-Z]{1,3}[\\s-]?[0-9]{4}").matcher(upper).find()
+            DocType.LPG_BILL -> Pattern.compile("[0-9A-Z]{6,16}").matcher(upper).find()
+            DocType.INSURANCE -> Pattern.compile("[0-9A-Z]{7,18}").matcher(upper).find()
+            DocType.UNKNOWN -> false
+        }
     }
 
     private fun extractDocumentFields(ocrText: String, docType: DocType): ExtractedFields {
@@ -274,6 +317,10 @@ object DocumentClassifier {
                 if (polMatcher.find()) {
                     foundDocNum = polMatcher.group(1) ?: ""
                 }
+            }
+
+            DocType.UNKNOWN -> {
+                // No doc-type-specific pattern to try; documentNumber stays unconfident.
             }
         }
 
@@ -472,6 +519,8 @@ object DocumentClassifier {
                     )
                 )
             }
+
+            DocType.UNKNOWN -> emptyList()
         }
     }
 }
