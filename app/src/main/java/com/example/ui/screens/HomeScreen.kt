@@ -22,22 +22,32 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +77,10 @@ fun HomeScreen(
     val selectedMemberId by viewModel.selectedMemberId.collectAsStateWithLifecycle()
     val obligations by viewModel.memberObligations.collectAsStateWithLifecycle()
 
+    var showAddMemberDialog by remember { mutableStateOf(false) }
+    var newMemberName by remember { mutableStateOf("") }
+    var newMemberRelation by remember { mutableStateOf("") }
+
     // Ensure initial member is selected once members load
     LaunchedEffect(members) {
         if (members.isNotEmpty() && selectedMemberId == null) {
@@ -75,6 +89,80 @@ fun HomeScreen(
     }
 
     val activeMemberId = selectedMemberId ?: members.firstOrNull()?.id ?: 1L
+
+    if (showAddMemberDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddMemberDialog = false },
+            title = {
+                Text(
+                    text = "Add Family Member",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = InkBackground
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Add a member to track their government and personal deadlines.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MutedText
+                    )
+                    OutlinedTextField(
+                        value = newMemberName,
+                        onValueChange = { newMemberName = it },
+                        label = { Text("Name (e.g. Dadi, Brother)") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("new_member_name_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = InkBackground,
+                            focusedLabelColor = InkBackground
+                        )
+                    )
+                    OutlinedTextField(
+                        value = newMemberRelation,
+                        onValueChange = { newMemberRelation = it },
+                        label = { Text("Relation (e.g. Grandmother, Brother)") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("new_member_relation_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = InkBackground,
+                            focusedLabelColor = InkBackground
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val name = newMemberName.trim()
+                        val rel = newMemberRelation.trim().ifBlank { "Family" }
+                        if (name.isNotBlank()) {
+                            viewModel.addFamilyMember(name, rel)
+                            showAddMemberDialog = false
+                        }
+                    },
+                    enabled = newMemberName.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = InkBackground),
+                    modifier = Modifier.testTag("confirm_add_member_button")
+                ) {
+                    Text("Add Member")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showAddMemberDialog = false },
+                    modifier = Modifier.testTag("cancel_add_member_button")
+                ) {
+                    Text("Cancel", color = MutedText)
+                }
+            }
+        )
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -169,6 +257,40 @@ fun HomeScreen(
                         isSelected = isSelected,
                         onClick = { viewModel.selectMember(member.id) }
                     )
+                }
+
+                // Add Member Action Chip
+                Surface(
+                    onClick = {
+                        newMemberName = ""
+                        newMemberRelation = ""
+                        showAddMemberDialog = true
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD6DFE6)),
+                    modifier = Modifier
+                        .height(42.dp)
+                        .testTag("add_member_chip")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add Member",
+                            tint = InkBackground,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Add Member",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = InkBackground
+                        )
+                    }
                 }
             }
 

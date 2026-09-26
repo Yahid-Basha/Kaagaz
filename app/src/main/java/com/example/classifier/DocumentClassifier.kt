@@ -8,6 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.regex.Pattern
 
 data class ExtractedFields(
@@ -307,108 +310,172 @@ object DocumentClassifier {
         )
     }
 
+    private fun parseDateToMillis(dateStr: String?): Long? {
+        if (dateStr.isNullOrBlank()) return null
+        val patterns = listOf(
+            "yyyy-MM-dd",
+            "dd/MM/yyyy",
+            "dd-MM-yyyy",
+            "yyyy/MM/dd",
+            "dd.MM.yyyy",
+            "d/M/yyyy",
+            "d-M-yyyy",
+            "MM/dd/yyyy",
+            "yyyy.MM.dd"
+        )
+        for (pattern in patterns) {
+            try {
+                val sdf = SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
+                val parsed = sdf.parse(dateStr.trim())
+                if (parsed != null) return parsed.time
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    private fun formatDate(millis: Long): String {
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
+    }
+
+    private fun computeStatus(dueMillis: Long, now: Long = System.currentTimeMillis()): ObligationStatus {
+        val diff = dueMillis - now
+        return when {
+            diff < 0 -> ObligationStatus.OVERDUE
+            diff <= 30L * 86_400_000L -> ObligationStatus.DUE_SOON
+            else -> ObligationStatus.OK
+        }
+    }
+
     // Mapping triggered obligations for each DocType
     fun getTriggeredObligations(
         docType: DocType,
         documentId: Long,
-        familyMemberId: Long
+        familyMemberId: Long,
+        printedDate: String? = null,
+        scannedAt: Long = System.currentTimeMillis()
     ): List<Obligation> {
+        // Use extracted printedDate as the basis whenever present and valid;
+        // only fall back to a default relative to scannedAt when printedDate is null or unparseable.
+        val parsedMillis = parseDateToMillis(printedDate)
+        val baseMillis = parsedMillis ?: scannedAt
+        val oneDay = 86_400_000L
+        val now = System.currentTimeMillis()
+
         return when (docType) {
-            DocType.RC -> listOf(
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "PUC Emission Renewal",
-                    dueDate = "2026-10-15",
-                    sourceName = "Parivahan Seva",
-                    sourceUrl = "https://parivahan.gov.in",
-                    status = ObligationStatus.DUE_SOON
-                ),
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "Vehicle Insurance Renewal",
-                    dueDate = "2027-02-14",
-                    sourceName = "DigiLocker Parivahan",
-                    sourceUrl = "https://parivahan.gov.in",
-                    status = ObligationStatus.OK
-                ),
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "FASTag KYC Verification",
-                    dueDate = "2026-09-15",
-                    sourceName = "NETC / NPCI",
-                    sourceUrl = "https://www.netc.org.in",
-                    status = ObligationStatus.OVERDUE
-                ),
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "Driving Licence (DL) Validity",
-                    dueDate = "2028-06-20",
-                    sourceName = "Parivahan Sarathi",
-                    sourceUrl = "https://sarathi.parivahan.gov.in",
-                    status = ObligationStatus.OK
+            DocType.RC -> {
+                val pucDue = baseMillis + (180L * oneDay)
+                val insDue = baseMillis + (365L * oneDay)
+                val fastagDue = baseMillis + (90L * oneDay)
+                val dlDue = baseMillis + (5L * 365L * oneDay)
+                listOf(
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "PUC Emission Renewal",
+                        dueDate = formatDate(pucDue),
+                        sourceName = "Parivahan Seva",
+                        sourceUrl = "https://parivahan.gov.in",
+                        status = computeStatus(pucDue, now)
+                    ),
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "Vehicle Insurance Renewal",
+                        dueDate = formatDate(insDue),
+                        sourceName = "DigiLocker Parivahan",
+                        sourceUrl = "https://parivahan.gov.in",
+                        status = computeStatus(insDue, now)
+                    ),
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "FASTag KYC Verification",
+                        dueDate = formatDate(fastagDue),
+                        sourceName = "NETC / NPCI",
+                        sourceUrl = "https://www.netc.org.in",
+                        status = computeStatus(fastagDue, now)
+                    ),
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "Driving Licence (DL) Validity",
+                        dueDate = formatDate(dlDue),
+                        sourceName = "Parivahan Sarathi",
+                        sourceUrl = "https://sarathi.parivahan.gov.in",
+                        status = computeStatus(dlDue, now)
+                    )
                 )
-            )
+            }
 
-            DocType.PUC -> listOf(
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "PUC Certificate Expiry Renewal",
-                    dueDate = "2026-10-08",
-                    sourceName = "Parivahan Seva",
-                    sourceUrl = "https://parivahan.gov.in",
-                    status = ObligationStatus.DUE_SOON
+            DocType.PUC -> {
+                val pucDue = baseMillis + (180L * oneDay)
+                listOf(
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "PUC Certificate Expiry Renewal",
+                        dueDate = formatDate(pucDue),
+                        sourceName = "Parivahan Seva",
+                        sourceUrl = "https://parivahan.gov.in",
+                        status = computeStatus(pucDue, now)
+                    )
                 )
-            )
+            }
 
-            DocType.LPG_BILL -> listOf(
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "LPG Biometric e-KYC Status",
-                    dueDate = "2026-10-25",
-                    sourceName = "Ministry of Petroleum",
-                    sourceUrl = "https://cx.indianoil.in",
-                    status = ObligationStatus.DUE_SOON
+            DocType.LPG_BILL -> {
+                val lpgDue = baseMillis + (30L * oneDay)
+                listOf(
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "LPG Biometric e-KYC Status",
+                        dueDate = formatDate(lpgDue),
+                        sourceName = "Ministry of Petroleum",
+                        sourceUrl = "https://cx.indianoil.in",
+                        status = computeStatus(lpgDue, now)
+                    )
                 )
-            )
+            }
 
-            DocType.PAN_CARD -> listOf(
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "PAN-Aadhaar Link Verification",
-                    dueDate = "2026-12-31",
-                    sourceName = "Income Tax Department",
-                    sourceUrl = "https://www.incometax.gov.in",
-                    status = ObligationStatus.OK
+            DocType.PAN_CARD -> {
+                val panDue = baseMillis + (180L * oneDay)
+                listOf(
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "PAN-Aadhaar Link Verification",
+                        dueDate = formatDate(panDue),
+                        sourceName = "Income Tax Department",
+                        sourceUrl = "https://www.incometax.gov.in",
+                        status = computeStatus(panDue, now)
+                    )
                 )
-            )
+            }
 
-            DocType.INSURANCE -> listOf(
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "Policy Annual Premium Renewal",
-                    dueDate = "2026-10-18",
-                    sourceName = "Insurance Regulatory (IRDAI)",
-                    sourceUrl = "https://licindia.in",
-                    status = ObligationStatus.DUE_SOON
-                ),
-                Obligation(
-                    documentId = documentId,
-                    familyMemberId = familyMemberId,
-                    title = "Policy Nominee & Beneficiary Check",
-                    dueDate = "2027-01-15",
-                    sourceName = "Insurance Regulatory (IRDAI)",
-                    sourceUrl = "https://licindia.in",
-                    status = ObligationStatus.OK
+            DocType.INSURANCE -> {
+                val premiumDue = baseMillis + (365L * oneDay)
+                val nomineeDue = baseMillis + (180L * oneDay)
+                listOf(
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "Policy Annual Premium Renewal",
+                        dueDate = formatDate(premiumDue),
+                        sourceName = "Insurance Regulatory (IRDAI)",
+                        sourceUrl = "https://licindia.in",
+                        status = computeStatus(premiumDue, now)
+                    ),
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "Policy Nominee & Beneficiary Check",
+                        dueDate = formatDate(nomineeDue),
+                        sourceName = "Insurance Regulatory (IRDAI)",
+                        sourceUrl = "https://licindia.in",
+                        status = computeStatus(nomineeDue, now)
+                    )
                 )
-            )
+            }
         }
     }
 }

@@ -70,6 +70,15 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
         _selectedMemberId.value = memberId
     }
 
+    fun addFamilyMember(name: String, relation: String, onAdded: (Long) -> Unit = {}) {
+        viewModelScope.launch {
+            val newMember = FamilyMember(name = name, relation = relation)
+            val newId = repository.addFamilyMember(newMember)
+            _selectedMemberId.value = newId
+            onAdded(newId)
+        }
+    }
+
     // --- Processing State ---
     private val _processingStep = MutableStateFlow("Reading document...")
     val processingStep: StateFlow<String> = _processingStep.asStateFlow()
@@ -80,6 +89,9 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
     // --- Scanned Document Result Draft ---
     private val _capturedImagePath = MutableStateFlow("")
     val capturedImagePath: StateFlow<String> = _capturedImagePath.asStateFlow()
+
+    private val _capturedBackImagePath = MutableStateFlow<String?>(null)
+    val capturedBackImagePath: StateFlow<String?> = _capturedBackImagePath.asStateFlow()
 
     private val _classifiedDocType = MutableStateFlow(DocType.RC)
     val classifiedDocType: StateFlow<DocType> = _classifiedDocType.asStateFlow()
@@ -105,18 +117,21 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
     private val _triggeredObligations = MutableStateFlow<List<Obligation>>(emptyList())
     val triggeredObligations: StateFlow<List<Obligation>> = _triggeredObligations.asStateFlow()
 
-    fun setCapturedImage(path: String, memberId: Long) {
+    fun setCapturedImage(path: String, memberId: Long, backPath: String? = null) {
         _capturedImagePath.value = path
+        _capturedBackImagePath.value = backPath
         _targetMemberId.value = memberId
     }
 
     fun startProcessingDocument(
         imagePath: String,
         initialMemberId: Long,
+        backImagePath: String? = null,
         onSuccess: () -> Unit
     ) {
         _isProcessing.value = true
         _capturedImagePath.value = imagePath
+        _capturedBackImagePath.value = backImagePath
         _targetMemberId.value = initialMemberId
 
         viewModelScope.launch {
@@ -126,13 +141,13 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
 
             var ocrRecognizedText = ""
 
-            // Run real Google ML Kit Text Recognition if file exists
-            val file = File(imagePath)
-            if (file.exists() && file.length() > 0) {
+            // Run real Google ML Kit Text Recognition on front image
+            val frontFile = File(imagePath)
+            if (frontFile.exists() && frontFile.length() > 0) {
                 try {
                     val inputImage = InputImage.fromFilePath(
                         getApplication(),
-                        Uri.fromFile(file)
+                        Uri.fromFile(frontFile)
                     )
                     ocrRecognizedText = withContext(Dispatchers.IO) {
                         try {
@@ -151,6 +166,41 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 } catch (e: Exception) {
                     ocrRecognizedText = ""
+                }
+            }
+
+            // Run OCR on back side if provided
+            if (!backImagePath.isNullOrBlank()) {
+                val backFile = File(backImagePath)
+                if (backFile.exists() && backFile.length() > 0) {
+                    try {
+                        val inputImageBack = InputImage.fromFilePath(
+                            getApplication(),
+                            Uri.fromFile(backFile)
+                        )
+                        val backText = withContext(Dispatchers.IO) {
+                            try {
+                                val task = textRecognizer.process(inputImageBack)
+                                var resultText = ""
+                                while (!task.isComplete) {
+                                    Thread.sleep(50)
+                                }
+                                if (task.isSuccessful) {
+                                    resultText = task.result?.text ?: ""
+                                }
+                                resultText
+                            } catch (e: Exception) {
+                                ""
+                            }
+                        }
+                        if (backText.isNotBlank()) {
+                            ocrRecognizedText = if (ocrRecognizedText.isBlank()) {
+                                backText
+                            } else {
+                                "$ocrRecognizedText\n--- BACK SIDE ---\n$backText"
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
             }
 
@@ -189,7 +239,9 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
             _triggeredObligations.value = DocumentClassifier.getTriggeredObligations(
                 docType = result.docType,
                 documentId = 0L,
-                familyMemberId = memberId
+                familyMemberId = memberId,
+                printedDate = result.extractedFields.printedDate,
+                scannedAt = System.currentTimeMillis()
             )
 
             _isProcessing.value = false
@@ -207,6 +259,14 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updatePrintedDate(value: String) {
         _extractedPrintedDate.value = value
+        val memberId = _targetMemberId.value ?: _selectedMemberId.value ?: 1L
+        _triggeredObligations.value = DocumentClassifier.getTriggeredObligations(
+            docType = _classifiedDocType.value,
+            documentId = 0L,
+            familyMemberId = memberId,
+            printedDate = value,
+            scannedAt = System.currentTimeMillis()
+        )
     }
 
     fun updateTargetMember(memberId: Long) {
@@ -216,7 +276,9 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
         _triggeredObligations.value = DocumentClassifier.getTriggeredObligations(
             docType = currentDocType,
             documentId = 0L,
-            familyMemberId = memberId
+            familyMemberId = memberId,
+            printedDate = _extractedPrintedDate.value,
+            scannedAt = System.currentTimeMillis()
         )
     }
 
@@ -226,7 +288,9 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
         _triggeredObligations.value = DocumentClassifier.getTriggeredObligations(
             docType = docType,
             documentId = 0L,
-            familyMemberId = memberId
+            familyMemberId = memberId,
+            printedDate = _extractedPrintedDate.value,
+            scannedAt = System.currentTimeMillis()
         )
     }
 
@@ -239,10 +303,16 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
                 put("date", _extractedPrintedDate.value)
             }.toString()
 
+            val storedImagePath = if (_capturedBackImagePath.value.isNullOrBlank()) {
+                _capturedImagePath.value
+            } else {
+                "${_capturedImagePath.value}|${_capturedBackImagePath.value}"
+            }
+
             val doc = ScannedDocument(
                 familyMemberId = memberId,
                 docType = _classifiedDocType.value,
-                imagePath = _capturedImagePath.value,
+                imagePath = storedImagePath,
                 extractedFields = jsonFields,
                 scannedAt = System.currentTimeMillis()
             )

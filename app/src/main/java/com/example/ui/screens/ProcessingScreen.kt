@@ -42,14 +42,16 @@ fun ProcessingScreen(
     viewModel: KaagazViewModel,
     imagePath: String,
     memberId: Long,
+    backImagePath: String? = null,
     onProcessingFinished: () -> Unit
 ) {
     val currentStep by viewModel.processingStep.collectAsStateWithLifecycle()
 
-    LaunchedEffect(imagePath, memberId) {
+    LaunchedEffect(imagePath, backImagePath, memberId) {
         viewModel.startProcessingDocument(
             imagePath = imagePath,
             initialMemberId = memberId,
+            backImagePath = backImagePath,
             onSuccess = onProcessingFinished
         )
     }

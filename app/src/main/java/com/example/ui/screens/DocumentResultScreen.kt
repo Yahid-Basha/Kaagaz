@@ -20,10 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -39,6 +41,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -78,11 +81,75 @@ fun DocumentResultScreen(
     val members by viewModel.familyMembers.collectAsStateWithLifecycle()
     val targetMemberId by viewModel.targetMemberId.collectAsStateWithLifecycle()
     val triggeredObligations by viewModel.triggeredObligations.collectAsStateWithLifecycle()
+    val capturedBackPath by viewModel.capturedBackImagePath.collectAsStateWithLifecycle()
 
     var showDocTypeDropdown by remember { mutableStateOf(false) }
     var showMemberDropdown by remember { mutableStateOf(false) }
+    var showAddMemberDialog by remember { mutableStateOf(false) }
+    var newMemberName by remember { mutableStateOf("") }
+    var newMemberRelation by remember { mutableStateOf("") }
 
     val currentMember = members.find { it.id == targetMemberId } ?: members.firstOrNull()
+
+    if (showAddMemberDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddMemberDialog = false },
+            title = {
+                Text(
+                    text = "Add Family Member",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = InkBackground
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Create a member to assign this document to.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MutedText
+                    )
+                    OutlinedTextField(
+                        value = newMemberName,
+                        onValueChange = { newMemberName = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newMemberRelation,
+                        onValueChange = { newMemberRelation = it },
+                        label = { Text("Relationship") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val name = newMemberName.trim()
+                        val rel = newMemberRelation.trim().ifBlank { "Family" }
+                        if (name.isNotBlank()) {
+                            viewModel.addFamilyMember(name, rel) { newId ->
+                                viewModel.updateTargetMember(newId)
+                            }
+                            showAddMemberDialog = false
+                        }
+                    },
+                    enabled = newMemberName.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = InkBackground)
+                ) {
+                    Text("Add & Assign")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddMemberDialog = false }) {
+                    Text("Cancel", color = MutedText)
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -251,6 +318,21 @@ fun DocumentResultScreen(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
                             }
+
+                            if (capturedBackPath != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFFF3E5F5)
+                                ) {
+                                    Text(
+                                        text = "2 Sides Scanned",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF7B1FA2),
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -370,6 +452,26 @@ fun DocumentResultScreen(
                                     }
                                 )
                             }
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = InkBackground,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("+ Add New Family Member", fontWeight = FontWeight.Bold, color = InkBackground)
+                                    }
+                                },
+                                onClick = {
+                                    showMemberDropdown = false
+                                    newMemberName = ""
+                                    newMemberRelation = ""
+                                    showAddMemberDialog = true
+                                }
+                            )
                         }
                     }
                 }

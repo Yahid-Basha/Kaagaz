@@ -68,19 +68,24 @@ class MainActivity : ComponentActivity() {
                             ScanScreen(
                                 memberId = memberId,
                                 onNavigateBack = { navController.popBackStack() },
-                                onPhotoConfirmed = { imagePath, mId ->
+                                onPhotoConfirmed = { imagePath, mId, backPath ->
                                     val encodedPath = Uri.encode(imagePath)
-                                    navController.navigate("processing/$mId?imagePath=$encodedPath")
+                                    val encodedBack = if (backPath != null) Uri.encode(backPath) else ""
+                                    navController.navigate("processing/$mId?imagePath=$encodedPath&backPath=$encodedBack")
                                 }
                             )
                         }
 
                         // 3. Processing Screen
                         composable(
-                            route = "processing/{memberId}?imagePath={imagePath}",
+                            route = "processing/{memberId}?imagePath={imagePath}&backPath={backPath}",
                             arguments = listOf(
                                 navArgument("memberId") { type = NavType.LongType },
                                 navArgument("imagePath") {
+                                    type = NavType.StringType
+                                    defaultValue = ""
+                                },
+                                navArgument("backPath") {
                                     type = NavType.StringType
                                     defaultValue = ""
                                 }
@@ -88,12 +93,15 @@ class MainActivity : ComponentActivity() {
                         ) { backStackEntry ->
                             val memberId = backStackEntry.arguments?.getLong("memberId") ?: 1L
                             val encodedPath = backStackEntry.arguments?.getString("imagePath") ?: ""
+                            val encodedBack = backStackEntry.arguments?.getString("backPath") ?: ""
                             val imagePath = Uri.decode(encodedPath)
+                            val backPath = if (encodedBack.isNotBlank()) Uri.decode(encodedBack) else null
 
                             ProcessingScreen(
                                 viewModel = viewModel,
                                 imagePath = imagePath,
                                 memberId = memberId,
+                                backImagePath = backPath,
                                 onProcessingFinished = {
                                     navController.navigate("document_result") {
                                         popUpTo("scan/$memberId") { inclusive = true }
