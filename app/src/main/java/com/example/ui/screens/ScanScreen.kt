@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -11,6 +12,7 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -48,6 +50,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -77,6 +80,9 @@ import androidx.core.content.ContextCompat
 import com.example.ui.theme.AmberDueSoon
 import com.example.ui.theme.GreenFine
 import com.example.ui.theme.InkBackground
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -95,6 +101,7 @@ fun ScanScreen(
     onPhotoConfirmed: (imagePath: String, memberId: Long, backImagePath: String?) -> Unit
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var hasCameraPermission by remember {
@@ -112,12 +119,6 @@ fun ScanScreen(
         hasCameraPermission = isGranted
     }
 
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
-        }
-    }
-
     var currentScanningSide by remember { mutableStateOf(ScanningSide.FRONT) }
     var frontPhotoPath by remember { mutableStateOf<String?>(null) }
     var frontBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -126,6 +127,113 @@ fun ScanScreen(
     var isShowingPreview by remember { mutableStateOf(false) }
     var selectedPreviewTab by remember { mutableStateOf(ScanningSide.FRONT) }
     var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
+
+    // True once the ML Kit document scanner has failed to launch, or its result came back
+    // canceled/failed - from then on this screen falls back to the CameraX capture flow below.
+    var showCameraFallback by remember { mutableStateOf(false) }
+
+    // Which side the in-flight scanner/camera invocation is meant to fill in. Null means a
+    // combined front(+back) capture, e.g. the initial auto-launch.
+    var pendingScanTarget by remember { mutableStateOf<ScanningSide?>(null) }
+
+    val documentScannerOptions = remember {
+        GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(2)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+    }
+
+    // Applies the document scanner's already edge-detected & deskewed pages. When capturing a
+    // specific side (Add/Retake Back), only that side is touched; otherwise page 0 -> front and
+    // an optional page 1 -> back (the scanner lets a user scan both sides in one session).
+    fun applyScannedPages(pages: List<GmsDocumentScanningResult.Page>, target: ScanningSide?) {
+        if (pages.isEmpty()) {
+            showCameraFallback = true
+            currentScanningSide = target ?: ScanningSide.FRONT
+            return
+        }
+        val firstBitmap = loadBitmapFromUri(context, pages[0].imageUri)
+        if (firstBitmap == null) {
+            showCameraFallback = true
+            currentScanningSide = target ?: ScanningSide.FRONT
+            return
+        }
+        val firstPath = saveBitmapToFile(context, firstBitmap)
+
+        if (target == ScanningSide.BACK) {
+            backPhotoPath = firstPath
+            backBitmap = firstBitmap
+            selectedPreviewTab = ScanningSide.BACK
+        } else {
+            frontPhotoPath = firstPath
+            frontBitmap = firstBitmap
+            selectedPreviewTab = ScanningSide.FRONT
+            if (pages.size > 1) {
+                val secondBitmap = loadBitmapFromUri(context, pages[1].imageUri)
+                if (secondBitmap != null) {
+                    backPhotoPath = saveBitmapToFile(context, secondBitmap)
+                    backBitmap = secondBitmap
+                }
+            }
+        }
+        isShowingPreview = true
+    }
+
+    val documentScannerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { activityResult ->
+        val data = activityResult.data
+        val pages = if (activityResult.resultCode == Activity.RESULT_OK && data != null) {
+            GmsDocumentScanningResult.fromActivityResultIntent(data)?.pages
+        } else {
+            null
+        }
+        if (pages != null && pages.isNotEmpty()) {
+            applyScannedPages(pages, pendingScanTarget)
+        } else {
+            // Canceled, failed, or came back with no pages - don't leave the user stuck.
+            showCameraFallback = true
+            currentScanningSide = pendingScanTarget ?: ScanningSide.FRONT
+        }
+    }
+
+    // Launches the ML Kit document scanner for the given side (null = combined front+back).
+    // Falls back to the CameraX capture UI if the scanner module can't be launched at all.
+    fun startCapture(target: ScanningSide?) {
+        pendingScanTarget = target
+        isShowingPreview = false
+        if (showCameraFallback || activity == null) {
+            showCameraFallback = true
+            currentScanningSide = target ?: ScanningSide.FRONT
+            return
+        }
+        GmsDocumentScanning.getClient(documentScannerOptions)
+            .getStartScanIntent(activity)
+            .addOnSuccessListener { intentSender ->
+                try {
+                    documentScannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+                } catch (_: Exception) {
+                    showCameraFallback = true
+                    currentScanningSide = target ?: ScanningSide.FRONT
+                }
+            }
+            .addOnFailureListener {
+                showCameraFallback = true
+                currentScanningSide = target ?: ScanningSide.FRONT
+            }
+    }
+
+    LaunchedEffect(Unit) {
+        startCapture(null)
+    }
+
+    LaunchedEffect(showCameraFallback) {
+        if (showCameraFallback && !hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
 
     // Launcher for picking images or PDFs from device storage
     val documentPickerLauncher = rememberLauncherForActivityResult(
@@ -151,15 +259,14 @@ fun ScanScreen(
             } else {
                 val imageBitmap = loadBitmapFromUri(context, uri)
                 if (imageBitmap != null) {
-                    val cropped = cropDocumentBitmap(imageBitmap)
-                    val savedPath = saveBitmapToFile(context, cropped)
+                    val savedPath = saveBitmapToFile(context, imageBitmap)
                     if (currentScanningSide == ScanningSide.BACK) {
                         backPhotoPath = savedPath
-                        backBitmap = cropped
+                        backBitmap = imageBitmap
                         selectedPreviewTab = ScanningSide.BACK
                     } else {
                         frontPhotoPath = savedPath
-                        frontBitmap = cropped
+                        frontBitmap = imageBitmap
                         selectedPreviewTab = ScanningSide.FRONT
                     }
                     isShowingPreview = true
@@ -173,8 +280,37 @@ fun ScanScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        if (!isShowingPreview) {
-            // Live Camera View
+        if (!isShowingPreview && !showCameraFallback) {
+            // Waiting on the ML Kit document scanner's full-screen activity to launch/return.
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(color = Color.White)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Opening scanner...",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            IconButton(
+                onClick = onNavigateBack,
+                modifier = Modifier
+                    .padding(start = 16.dp, top = 36.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .testTag("scan_back_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White
+                )
+            }
+        } else if (!isShowingPreview) {
+            // CameraX Fallback - shown only when the document scanner couldn't be launched.
             if (hasCameraPermission) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -339,16 +475,15 @@ fun ScanScreen(
                                     }
                                     val samplePath = createSampleDocumentFile(context, sampleText)
                                     val sampleBitmap = BitmapFactory.decodeFile(samplePath)
-                                    val cropped = cropDocumentBitmap(sampleBitmap)
-                                    val savedPath = saveBitmapToFile(context, cropped)
+                                    val savedPath = saveBitmapToFile(context, sampleBitmap)
 
                                     if (currentScanningSide == ScanningSide.BACK) {
                                         backPhotoPath = savedPath
-                                        backBitmap = cropped
+                                        backBitmap = sampleBitmap
                                         selectedPreviewTab = ScanningSide.BACK
                                     } else {
                                         frontPhotoPath = savedPath
-                                        frontBitmap = cropped
+                                        frontBitmap = sampleBitmap
                                         selectedPreviewTab = ScanningSide.FRONT
                                     }
                                     isShowingPreview = true
@@ -380,16 +515,15 @@ fun ScanScreen(
                                             object : ImageCapture.OnImageSavedCallback {
                                                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                                                     val rawBitmap = BitmapFactory.decodeFile(tempFile.absolutePath)
-                                                    val cropped = if (rawBitmap != null) cropDocumentBitmap(rawBitmap) else null
-                                                    val finalPath = if (cropped != null) saveBitmapToFile(context, cropped) else tempFile.absolutePath
+                                                    val finalPath = if (rawBitmap != null) saveBitmapToFile(context, rawBitmap) else tempFile.absolutePath
 
                                                     if (currentScanningSide == ScanningSide.BACK) {
                                                         backPhotoPath = finalPath
-                                                        backBitmap = cropped ?: rawBitmap
+                                                        backBitmap = rawBitmap
                                                         selectedPreviewTab = ScanningSide.BACK
                                                     } else {
                                                         frontPhotoPath = finalPath
-                                                        frontBitmap = cropped ?: rawBitmap
+                                                        frontBitmap = rawBitmap
                                                         selectedPreviewTab = ScanningSide.FRONT
                                                     }
                                                     isShowingPreview = true
@@ -399,16 +533,15 @@ fun ScanScreen(
                                                     // Fallback to sample document if camera capture fails on virtual environment
                                                     val samplePath = createSampleDocumentFile(context, "REGISTRATION CERTIFICATE\nTS 09 AB 1234\nRahul Sharma\nDate: 15/10/2023\nPUC Valid: 05/10/2026")
                                                     val sampleBitmap = BitmapFactory.decodeFile(samplePath)
-                                                    val cropped = cropDocumentBitmap(sampleBitmap)
-                                                    val finalPath = saveBitmapToFile(context, cropped)
+                                                    val finalPath = saveBitmapToFile(context, sampleBitmap)
 
                                                     if (currentScanningSide == ScanningSide.BACK) {
                                                         backPhotoPath = finalPath
-                                                        backBitmap = cropped
+                                                        backBitmap = sampleBitmap
                                                         selectedPreviewTab = ScanningSide.BACK
                                                     } else {
                                                         frontPhotoPath = finalPath
-                                                        frontBitmap = cropped
+                                                        frontBitmap = sampleBitmap
                                                         selectedPreviewTab = ScanningSide.FRONT
                                                     }
                                                     isShowingPreview = true
@@ -418,16 +551,15 @@ fun ScanScreen(
                                     } else {
                                         val samplePath = createSampleDocumentFile(context, "REGISTRATION CERTIFICATE\nTS 09 AB 1234\nRahul Sharma\nDate: 15/10/2023\nPUC Valid: 05/10/2026")
                                         val sampleBitmap = BitmapFactory.decodeFile(samplePath)
-                                        val cropped = cropDocumentBitmap(sampleBitmap)
-                                        val finalPath = saveBitmapToFile(context, cropped)
+                                        val finalPath = saveBitmapToFile(context, sampleBitmap)
 
                                         if (currentScanningSide == ScanningSide.BACK) {
                                             backPhotoPath = finalPath
-                                            backBitmap = cropped
+                                            backBitmap = sampleBitmap
                                             selectedPreviewTab = ScanningSide.BACK
                                         } else {
                                             frontPhotoPath = finalPath
-                                            frontBitmap = cropped
+                                            frontBitmap = sampleBitmap
                                             selectedPreviewTab = ScanningSide.FRONT
                                         }
                                         isShowingPreview = true
@@ -673,10 +805,7 @@ fun ScanScreen(
                     // Option to Add Back Side (if not captured yet)
                     if (backBitmap == null) {
                         OutlinedButton(
-                            onClick = {
-                                currentScanningSide = ScanningSide.BACK
-                                isShowingPreview = false
-                            },
+                            onClick = { startCapture(ScanningSide.BACK) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
@@ -704,10 +833,7 @@ fun ScanScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             OutlinedButton(
-                                onClick = {
-                                    currentScanningSide = ScanningSide.BACK
-                                    isShowingPreview = false
-                                },
+                                onClick = { startCapture(ScanningSide.BACK) },
                                 modifier = Modifier.weight(1f).height(44.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
@@ -739,17 +865,11 @@ fun ScanScreen(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                if (backBitmap != null) {
-                                    frontBitmap = null
-                                    frontPhotoPath = null
-                                    backBitmap = null
-                                    backPhotoPath = null
-                                } else {
-                                    frontBitmap = null
-                                    frontPhotoPath = null
-                                }
-                                currentScanningSide = ScanningSide.FRONT
-                                isShowingPreview = false
+                                frontBitmap = null
+                                frontPhotoPath = null
+                                backBitmap = null
+                                backPhotoPath = null
+                                startCapture(null)
                             },
                             modifier = Modifier
                                 .weight(1f)
@@ -803,23 +923,6 @@ fun ScanScreen(
                 }
             }
         }
-    }
-}
-
-// Trims a thin safety margin (camera-body/background edges) from a camera or imported
-// picture. Deliberately small - a document is expected to already fill the frame, so this
-// only guards against edge noise rather than attempting to locate/crop to the document itself.
-fun cropDocumentBitmap(source: Bitmap): Bitmap {
-    val marginRatio = 0.025f
-    val startX = (source.width * marginRatio).toInt().coerceAtLeast(0)
-    val startY = (source.height * marginRatio).toInt().coerceAtLeast(0)
-    val cropW = (source.width * (1f - 2 * marginRatio)).toInt().coerceAtMost(source.width - startX)
-    val cropH = (source.height * (1f - 2 * marginRatio)).toInt().coerceAtMost(source.height - startY)
-
-    return if (cropW > 100 && cropH > 100 && cropW < source.width && cropH < source.height) {
-        Bitmap.createBitmap(source, startX, startY, cropW, cropH)
-    } else {
-        source
     }
 }
 
