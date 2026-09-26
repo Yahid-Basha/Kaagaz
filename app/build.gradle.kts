@@ -101,7 +101,7 @@ dependencies {
   implementation(libs.mlkit.text.recognition)
   implementation(libs.play.services.mlkit.document.scanner)
   implementation("com.google.mediapipe:tasks-genai:latest.release")
-  // implementation(libs.converter.moshi)
+  implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)

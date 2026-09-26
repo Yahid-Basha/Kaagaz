@@ -15,6 +15,9 @@ import com.example.data.model.Obligation
 import com.example.data.model.ObligationStatus
 import com.example.data.model.ScannedDocument
 import com.example.data.repository.KaagazRepository
+import com.example.network.DeadlineSyncService
+import com.example.network.SyncFinding
+import com.example.network.SyncOutcome
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -352,10 +355,36 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun syncAllSources(onCompleted: () -> Unit) {
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    private val _syncFindings = MutableStateFlow<List<SyncFinding>>(emptyList())
+    val syncFindings: StateFlow<List<SyncFinding>> = _syncFindings.asStateFlow()
+
+    private val _syncUnavailableReason = MutableStateFlow<String?>(null)
+    val syncUnavailableReason: StateFlow<String?> = _syncUnavailableReason.asStateFlow()
+
+    private val _lastSyncedAt = MutableStateFlow<Long?>(null)
+    val lastSyncedAt: StateFlow<Long?> = _lastSyncedAt.asStateFlow()
+
+    fun syncAllSources() {
+        if (_isSyncing.value) return
         viewModelScope.launch {
-            repository.syncAllSources()
-            onCompleted()
+            _isSyncing.value = true
+            when (val outcome = DeadlineSyncService.runSync(getApplication())) {
+                is SyncOutcome.Success -> {
+                    _syncFindings.value = outcome.findings
+                    _syncUnavailableReason.value = null
+                    _lastSyncedAt.value = outcome.checkedAt
+                    // Only bump the DB's "last verified" bookkeeping once we actually completed
+                    // a real check - never mark obligations as freshly verified on a failed sync.
+                    repository.syncAllSources()
+                }
+                is SyncOutcome.Unavailable -> {
+                    _syncUnavailableReason.value = outcome.reason
+                }
+            }
+            _isSyncing.value = false
         }
     }
 }
