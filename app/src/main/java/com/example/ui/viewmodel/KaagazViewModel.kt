@@ -111,6 +111,15 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
     private val _extractedPrintedDate = MutableStateFlow("")
     val extractedPrintedDate: StateFlow<String> = _extractedPrintedDate.asStateFlow()
 
+    private val _holderNameConfident = MutableStateFlow(true)
+    val holderNameConfident: StateFlow<Boolean> = _holderNameConfident.asStateFlow()
+
+    private val _docNumberConfident = MutableStateFlow(true)
+    val docNumberConfident: StateFlow<Boolean> = _docNumberConfident.asStateFlow()
+
+    private val _printedDateConfident = MutableStateFlow(true)
+    val printedDateConfident: StateFlow<Boolean> = _printedDateConfident.asStateFlow()
+
     private val _targetMemberId = MutableStateFlow<Long?>(null)
     val targetMemberId: StateFlow<Long?> = _targetMemberId.asStateFlow()
 
@@ -230,6 +239,9 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
             _extractedHolderName.value = result.extractedFields.holderName
             _extractedDocNumber.value = result.extractedFields.documentNumber
             _extractedPrintedDate.value = result.extractedFields.printedDate
+            _holderNameConfident.value = result.extractedFields.holderNameConfident
+            _docNumberConfident.value = result.extractedFields.documentNumberConfident
+            _printedDateConfident.value = result.extractedFields.printedDateConfident
 
             // Stage 3: Checking what it owes
             _processingStep.value = "Checking what it owes..."
@@ -251,14 +263,17 @@ class KaagazViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateHolderName(value: String) {
         _extractedHolderName.value = value
+        _holderNameConfident.value = value.isNotBlank()
     }
 
     fun updateDocNumber(value: String) {
         _extractedDocNumber.value = value
+        _docNumberConfident.value = value.isNotBlank()
     }
 
     fun updatePrintedDate(value: String) {
         _extractedPrintedDate.value = value
+        _printedDateConfident.value = value.isNotBlank()
         val memberId = _targetMemberId.value ?: _selectedMemberId.value ?: 1L
         _triggeredObligations.value = DocumentClassifier.getTriggeredObligations(
             docType = _classifiedDocType.value,

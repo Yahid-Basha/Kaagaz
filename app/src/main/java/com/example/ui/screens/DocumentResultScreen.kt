@@ -78,6 +78,9 @@ fun DocumentResultScreen(
     val holderName by viewModel.extractedHolderName.collectAsStateWithLifecycle()
     val docNumber by viewModel.extractedDocNumber.collectAsStateWithLifecycle()
     val printedDate by viewModel.extractedPrintedDate.collectAsStateWithLifecycle()
+    val holderNameConfident by viewModel.holderNameConfident.collectAsStateWithLifecycle()
+    val docNumberConfident by viewModel.docNumberConfident.collectAsStateWithLifecycle()
+    val printedDateConfident by viewModel.printedDateConfident.collectAsStateWithLifecycle()
     val members by viewModel.familyMembers.collectAsStateWithLifecycle()
     val targetMemberId by viewModel.targetMemberId.collectAsStateWithLifecycle()
     val triggeredObligations by viewModel.triggeredObligations.collectAsStateWithLifecycle()
@@ -500,11 +503,14 @@ fun DocumentResultScreen(
                         value = holderName,
                         onValueChange = { viewModel.updateHolderName(it) },
                         label = { Text("Document Holder Name") },
+                        placeholder = if (!holderNameConfident) {
+                            { Text("Couldn't read this — please check") }
+                        } else null,
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("input_holder_name"),
                         shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
+                        colors = if (!holderNameConfident) unconfidentFieldColors() else OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = InkBackground,
                             focusedLabelColor = InkBackground
                         )
@@ -516,11 +522,14 @@ fun DocumentResultScreen(
                         value = docNumber,
                         onValueChange = { viewModel.updateDocNumber(it) },
                         label = { Text("Document / Vehicle / Policy ID") },
+                        placeholder = if (!docNumberConfident) {
+                            { Text("Couldn't read this — please check") }
+                        } else null,
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("input_doc_number"),
                         shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
+                        colors = if (!docNumberConfident) unconfidentFieldColors() else OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = InkBackground,
                             focusedLabelColor = InkBackground
                         )
@@ -532,11 +541,14 @@ fun DocumentResultScreen(
                         value = printedDate,
                         onValueChange = { viewModel.updatePrintedDate(it) },
                         label = { Text("Issue or Printed Date") },
+                        placeholder = if (!printedDateConfident) {
+                            { Text("Couldn't read this — please check") }
+                        } else null,
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("input_printed_date"),
                         shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
+                        colors = if (!printedDateConfident) unconfidentFieldColors() else OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = InkBackground,
                             focusedLabelColor = InkBackground
                         )
@@ -605,3 +617,12 @@ fun DocumentResultScreen(
         }
     }
 }
+
+@Composable
+private fun unconfidentFieldColors() = OutlinedTextFieldDefaults.colors(
+    unfocusedBorderColor = Color(0xFFC77700),
+    focusedBorderColor = Color(0xFFC77700),
+    unfocusedLabelColor = Color(0xFFC77700),
+    focusedLabelColor = Color(0xFFC77700),
+    placeholderColor = Color(0xFFC77700)
+)

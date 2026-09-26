@@ -16,7 +16,10 @@ import java.util.regex.Pattern
 data class ExtractedFields(
     val holderName: String = "",
     val documentNumber: String = "",
-    val printedDate: String = ""
+    val printedDate: String = "",
+    val holderNameConfident: Boolean = true,
+    val documentNumberConfident: Boolean = true,
+    val printedDateConfident: Boolean = true
 )
 
 data class ClassificationResult(
@@ -121,7 +124,10 @@ object DocumentClassifier {
             val extractedFields = ExtractedFields(
                 holderName = holderName.ifBlank { fallbackFields.holderName },
                 documentNumber = docNumber.ifBlank { fallbackFields.documentNumber },
-                printedDate = printedDate.ifBlank { fallbackFields.printedDate }
+                printedDate = printedDate.ifBlank { fallbackFields.printedDate },
+                holderNameConfident = holderName.isNotBlank() || fallbackFields.holderNameConfident,
+                documentNumberConfident = docNumber.isNotBlank() || fallbackFields.documentNumberConfident,
+                printedDateConfident = printedDate.isNotBlank() || fallbackFields.printedDateConfident
             )
 
             // 5. If parsing succeeds, map it into the existing ClassificationResult type.
@@ -271,16 +277,7 @@ object DocumentClassifier {
             }
         }
 
-        // Fallbacks for realistic test display
-        if (foundDocNum.isEmpty()) {
-            foundDocNum = when (docType) {
-                DocType.RC -> "TS 09 AB 1234"
-                DocType.PUC -> "DL 01 PU 5821"
-                DocType.LPG_BILL -> "LPG-99201488"
-                DocType.PAN_CARD -> "ABCDE1234F"
-                DocType.INSURANCE -> "POL-LIC-448291"
-            }
-        }
+        val docNumConfident = foundDocNum.isNotEmpty()
 
         if (foundName.isEmpty()) {
             for (line in lines) {
@@ -294,19 +291,18 @@ object DocumentClassifier {
                     break
                 }
             }
-            if (foundName.isEmpty()) {
-                foundName = "Family Document Holder"
-            }
         }
+        val nameConfident = foundName.isNotEmpty()
 
-        if (foundDate.isEmpty()) {
-            foundDate = "2026-10-15"
-        }
+        val dateConfident = foundDate.isNotEmpty()
 
         return ExtractedFields(
             holderName = foundName,
             documentNumber = foundDocNum,
-            printedDate = foundDate
+            printedDate = foundDate,
+            holderNameConfident = nameConfident,
+            documentNumberConfident = docNumConfident,
+            printedDateConfident = dateConfident
         )
     }
 
