@@ -806,12 +806,15 @@ fun ScanScreen(
     }
 }
 
-// Crops the document area from a camera or imported picture so only the document itself is saved & displayed
+// Trims a thin safety margin (camera-body/background edges) from a camera or imported
+// picture. Deliberately small - a document is expected to already fill the frame, so this
+// only guards against edge noise rather than attempting to locate/crop to the document itself.
 fun cropDocumentBitmap(source: Bitmap): Bitmap {
-    val startX = (source.width * 0.08f).toInt().coerceAtLeast(0)
-    val startY = (source.height * 0.10f).toInt().coerceAtLeast(0)
-    val cropW = (source.width * 0.84f).toInt().coerceAtMost(source.width - startX)
-    val cropH = (source.height * 0.70f).toInt().coerceAtMost(source.height - startY)
+    val marginRatio = 0.025f
+    val startX = (source.width * marginRatio).toInt().coerceAtLeast(0)
+    val startY = (source.height * marginRatio).toInt().coerceAtLeast(0)
+    val cropW = (source.width * (1f - 2 * marginRatio)).toInt().coerceAtMost(source.width - startX)
+    val cropH = (source.height * (1f - 2 * marginRatio)).toInt().coerceAtMost(source.height - startY)
 
     return if (cropW > 100 && cropH > 100 && cropW < source.width && cropH < source.height) {
         Bitmap.createBitmap(source, startX, startY, cropW, cropH)
