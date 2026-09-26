@@ -624,5 +624,6 @@ private fun unconfidentFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = Color(0xFFC77700),
     unfocusedLabelColor = Color(0xFFC77700),
     focusedLabelColor = Color(0xFFC77700),
-    placeholderColor = Color(0xFFC77700)
+    unfocusedPlaceholderColor = Color(0xFFC77700),
+    focusedPlaceholderColor = Color(0xFFC77700)
 )
