@@ -89,8 +89,17 @@ object DeadlineSyncService {
     suspend fun runSync(context: Context): SyncOutcome = withContext(Dispatchers.IO) {
         val apiKey = OpenRouterClient.apiKey
         if (apiKey.isBlank()) {
-            Log.w(TAG, "OPENROUTER_API_KEY not configured, skipping sync")
-            return@withContext SyncOutcome.Unavailable("OpenRouter API key not configured")
+            val status = OpenRouterClient.apiKeyStatus
+            Log.w(TAG, "OPENROUTER_API_KEY not usable ($status), skipping sync")
+            val reason = when (status) {
+                "missing-buildconfig-field" ->
+                    "OpenRouter API key not configured (BuildConfig field was never generated - " +
+                        "the build didn't see it in .env/Secrets)"
+                "blank-buildconfig-field" ->
+                    "OpenRouter API key not configured (BuildConfig field exists but is blank)"
+                else -> "OpenRouter API key not configured"
+            }
+            return@withContext SyncOutcome.Unavailable(reason)
         }
         if (!hasInternetConnection(context)) {
             return@withContext SyncOutcome.Unavailable("No internet connection")

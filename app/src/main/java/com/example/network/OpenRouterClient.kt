@@ -21,23 +21,43 @@ object OpenRouterClient {
     // panel, a plain runtime env var) don't reliably agree on whether/when that happens. A
     // missing BuildConfig field must never be a compile error for an optional integration -
     // reflection degrades to the env-var fallback (or "") instead.
-    val apiKey: String by lazy { resolveApiKey() }
+    val apiKey: String by lazy { resolveApiKey().value }
 
-    private fun resolveApiKey(): String {
-        val fromBuildConfig = try {
-            val field = Class.forName("com.example.BuildConfig").getField("OPENROUTER_API_KEY")
-            field.get(null) as? String
+    // Distinguishes *why* the key is missing so the sync-unavailable message on screen can say
+    // something more actionable than a generic "not configured" - this has been the actual
+    // sticking point across several build attempts.
+    val apiKeyStatus: String by lazy { resolveApiKey().status }
+
+    private data class ResolvedKey(val value: String, val status: String)
+
+    private fun resolveApiKey(): ResolvedKey {
+        val buildConfigField = try {
+            Class.forName("com.example.BuildConfig").getField("OPENROUTER_API_KEY")
         } catch (_: Throwable) {
-            Log.i(TAG, "BuildConfig.OPENROUTER_API_KEY not generated (key not configured)")
             null
         }
-        if (!fromBuildConfig.isNullOrBlank()) return fromBuildConfig
 
-        return try {
-            System.getenv("OPENROUTER_API_KEY") ?: ""
-        } catch (_: Throwable) {
-            ""
+        if (buildConfigField == null) {
+            Log.i(TAG, "BuildConfig.OPENROUTER_API_KEY field does not exist - Secrets plugin never saw the key at build time")
+            val fromEnv = try {
+                System.getenv("OPENROUTER_API_KEY")
+            } catch (_: Throwable) {
+                null
+            }
+            if (!fromEnv.isNullOrBlank()) return ResolvedKey(fromEnv, "ok")
+            return ResolvedKey("", "missing-buildconfig-field")
         }
+
+        val value = try {
+            buildConfigField.get(null) as? String
+        } catch (_: Throwable) {
+            null
+        }
+        if (value.isNullOrBlank()) {
+            Log.i(TAG, "BuildConfig.OPENROUTER_API_KEY exists but is blank - key line likely empty/commented in whatever .env the build actually read")
+            return ResolvedKey("", "blank-buildconfig-field")
+        }
+        return ResolvedKey(value, "ok")
     }
 
     private val authInterceptor = Interceptor { chain ->
