@@ -60,7 +60,8 @@ object DeadlineSyncService {
             rules = listOf(
                 HardcodedRule("PUC Emission Renewal", "180 days after issue/PUC date"),
                 HardcodedRule("FASTag KYC Verification", "90 days after issue"),
-                HardcodedRule("Driving Licence (DL) Validity", "1825 days (5 years) after issue")
+                HardcodedRule("Driving Licence (DL) Validity", "1825 days (5 years) after issue"),
+                HardcodedRule("Driving Licence Mobile Number Link", "one-time action, prompted 30 days after issue")
             )
         ),
         SyncCategoryDef(

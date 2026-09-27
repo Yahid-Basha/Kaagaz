@@ -410,6 +410,9 @@ object DocumentClassifier {
                 val insDue = baseMillis + (365L * oneDay)
                 val fastagDue = baseMillis + (90L * oneDay)
                 val dlDue = baseMillis + (5L * 365L * oneDay)
+                // One-time action, not a recurring renewal - due date is just a "do this soon"
+                // prompt rather than a periodic compliance interval.
+                val dlMobileLinkDue = baseMillis + (30L * oneDay)
                 listOf(
                     Obligation(
                         documentId = documentId,
@@ -446,6 +449,15 @@ object DocumentClassifier {
                         sourceName = "Parivahan Sarathi",
                         sourceUrl = "https://sarathi.parivahan.gov.in",
                         status = computeStatus(dlDue, now)
+                    ),
+                    Obligation(
+                        documentId = documentId,
+                        familyMemberId = familyMemberId,
+                        title = "Driving Licence Mobile Number Link",
+                        dueDate = formatDate(dlMobileLinkDue),
+                        sourceName = "Parivahan Sarathi",
+                        sourceUrl = "https://sarathi.parivahan.gov.in",
+                        status = computeStatus(dlMobileLinkDue, now)
                     )
                 )
             }
