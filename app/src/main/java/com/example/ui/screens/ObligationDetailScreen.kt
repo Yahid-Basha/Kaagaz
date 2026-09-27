@@ -276,15 +276,13 @@ fun ObligationDetailScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Primary Button: "Open"
+                // Primary Button: opens the specific action page when one is verified, else the
+                // authority's general portal.
+                val openTarget = item.actionUrl ?: item.sourceUrl
                 Button(
                     onClick = {
-                        // TODO: wire to prefilled UPI intent / Parivahan deep link / WhatsApp reminder
-                        // For vehicle obligations: TODO wire to Parivahan mParivahan deep link or Vahan portal
-                        // For tax obligations: TODO wire to Income Tax e-filing direct link
-                        // For gas obligations: TODO wire to Bharat Petroleum / Indane Quick Pay UPI deep link
                         try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(item.sourceUrl))
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(openTarget))
                             context.startActivity(intent)
                         } catch (e: Exception) {
                             Toast.makeText(context, "Could not open authority portal", Toast.LENGTH_SHORT).show()
@@ -307,7 +305,7 @@ fun ObligationDetailScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Open",
+                        text = if (item.actionUrl != null) "Open Action Page" else "Open Portal",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )

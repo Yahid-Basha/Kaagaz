@@ -421,6 +421,7 @@ object DocumentClassifier {
                         dueDate = formatDate(pucDue),
                         sourceName = "Parivahan Seva",
                         sourceUrl = "https://parivahan.gov.in",
+                        actionUrl = "https://puc.parivahan.gov.in/puc/views/ApplicationStatusCheck.xhtml",
                         status = computeStatus(pucDue, now)
                     ),
                     Obligation(
@@ -472,6 +473,7 @@ object DocumentClassifier {
                         dueDate = formatDate(pucDue),
                         sourceName = "Parivahan Seva",
                         sourceUrl = "https://parivahan.gov.in",
+                        actionUrl = "https://puc.parivahan.gov.in/puc/views/ApplicationStatusCheck.xhtml",
                         status = computeStatus(pucDue, now)
                     )
                 )
@@ -487,6 +489,7 @@ object DocumentClassifier {
                         dueDate = formatDate(lpgDue),
                         sourceName = "Ministry of Petroleum",
                         sourceUrl = "https://cx.indianoil.in",
+                        actionUrl = "https://pmuy.gov.in/mylpg.html",
                         status = computeStatus(lpgDue, now)
                     )
                 )
@@ -502,6 +505,7 @@ object DocumentClassifier {
                         dueDate = formatDate(panDue),
                         sourceName = "Income Tax Department",
                         sourceUrl = "https://www.incometax.gov.in",
+                        actionUrl = "https://eportal.incometax.gov.in/iec/foservices/#/login",
                         status = computeStatus(panDue, now)
                     )
                 )

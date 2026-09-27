@@ -29,6 +29,10 @@ data class Obligation(
     val dueDate: String, // Formatted date string, e.g. "2026-10-05" or "Oct 05, 2026"
     val sourceName: String,
     val sourceUrl: String,
+    // Verified, specific action page for the obligation (e.g. a status-check or e-filing form) -
+    // only set where DocumentClassifier.getTriggeredObligations has actually confirmed one
+    // exists. Null means no such page is known; callers should fall back to sourceUrl.
+    val actionUrl: String? = null,
     val status: ObligationStatus,
     val lastVerifiedAt: Long = System.currentTimeMillis()
 )
